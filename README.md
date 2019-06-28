@@ -19,7 +19,7 @@ LED underglow for my hookah (in Germany we call it Shisha)
   * Aktivierung des Mikrofons lässt den Regenbogen schneller drehen.
 
 ## Weiß
-* Langer Knopfdruck wechselt zu einfarbig.
+* Langer Knopfdruck wechselt zu Einfarbig.
 * Drehen des Drehencoders ändert die Helligkeit.
 * Ein kurzer Knopfdruck wechselt die Funktion des Drehencoders, um das Mikrofon einzuschalten.
   * Aktivierung des Mikrofons lässt einzelne Pixel in zufälligen Farben aufhellen und langsam wieder in die Ursprungsposition zurückkehren.
