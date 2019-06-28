@@ -146,6 +146,9 @@ void loop() {
     if(buttonShortPress) {
         cycleSettings();
     }
+    if(rotation != 0) {
+        updateSetting();
+    }
 
     //Update the LED Strip at a limited rate
     if(millis() % UPDATE_DELAY == 0) {
@@ -310,8 +313,58 @@ void updateWhite() {
     }
 }
 
+const int indicateSettingBlinkFrames = 10;
+bool indicateSettingBlinkOn = true;
+int indicateSettingFrameCounter = 0;
 void indicateSetting() {
+    //Indicate current setting by turning off one LED per settin (sans the 0th Setting (Default setting / quick setting))
+    for(int i = 1; i < currentModeNumSettings; i++) {
+        strip.setPixelColor(i, strip.Color(0,0,0));
+        if(i == currentSetting) {
+            if(indicateSettingBlinkOn) {
+                strip.setPixelColor(i, strip.Color(255,255,255));
+            }
+            if(indicateSettingFrameCounter > indicateSettingBlinkFrames) {
+                indicateSettingFrameCounter = 0;
+                indicateSettingBlinkOn = !indicateSettingBlinkOn;
+            }
+            indicateSettingFrameCounter ++;
+        }
+    }
+    //In order to display the microphone setting turn all LEDs off
+    //If the center is green the microphone is on, if it is red the microphone is off
+    if(settings[currentMode][currentSetting].value = &settingMicrophone) {
+        for(int i = currentModeNumSettings; i < strip.numPixels(); i ++ ) {
+            strip.setPixelColor(i, 0x00000000);
+        }
 
+        if(settingMicrophone == 1) {
+            strip.setPixelColor(0, strip.Color(0,255,0));
+        } else if (settingMicrophone == 0) {
+            strip.setPixelColor(0, strip.Color(255,0,0));
+        }
+    }
+}
+
+void updateSetting() {
+    Setting s = settings[currentMode][currentSetting];
+    if(rotation == 1) {
+        if(s.max - *s.value < s.step) {
+            if(s.rollover) {
+                *s.value = s.step - (s.max - *s.value);
+            } else {
+                *s.value = s.max;
+            }
+        }
+    } else if (rotation == -1) {
+        if(*s.value < s.step) {
+            if(s.rollover) {
+                *s.value = s.max - (s.step - 1 - *s.value);
+            } else {
+                *s.value = 0;
+            }
+        }
+    }
 }
 
 //--HELPER-FUNCTIONS--
