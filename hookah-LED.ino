@@ -68,27 +68,31 @@ void setup() {
     pinMode(ROTARY_B, INPUT);
     pinMode(MICROPHONE, INPUT);
 
-//    //Load Settings from EEPROM
-//    settingBrightness = eepromReadUInt16(SETTING_BRIGHTNESS_ADDRESS);
-//
-//    settingColorHue = eepromReadUInt16(SETTING_COLOR_HUE_ADDRESS);
-//    settingColorSaturation = eepromReadUInt16(SETTING_COLOR_SATURATION_ADDRESS);
-//
-//    settingRainbowStep = eepromReadUInt16(SETTING_RAINBOW_STEP_ADDRESS);
-//
-//    settingMicrophone = eepromReadUInt16(SETTING_MICROPHONE_ADDRESS);
+   //Load Settings from EEPROM
+   settingBrightness = eepromReadUInt16(SETTING_BRIGHTNESS_ADDRESS);
 
-    
-    settingBrightness = 127;
+   settingColorHue = eepromReadUInt16(SETTING_COLOR_HUE_ADDRESS);
+   settingColorSaturation = eepromReadUInt16(SETTING_COLOR_SATURATION_ADDRESS);
 
-    settingColorHue = 0;
-    settingColorSaturation = 255;
+   settingRainbowStep = eepromReadUInt16(SETTING_RAINBOW_STEP_ADDRESS);
 
-    settingRainbowStep = 512;
-
-    settingMicrophone = 1;
+   settingMicrophone = eepromReadUInt16(SETTING_MICROPHONE_ADDRESS);
 
     Serial.begin(9600);
+    Serial.println("Loaded settings from EEPROM:");
+    Serial.print("settingBrightness: ");
+    Serial.println(settingBrightness);
+
+    Serial.print("settingColorHue: ");
+    Serial.println(settingColorHue);
+    Serial.print("settingColorSaturation: ");
+    Serial.println(settingColorSaturation);
+    
+    Serial.print("settingRainbowStep: ");
+    Serial.println(settingRainbowStep);
+    
+    Serial.print("settingMicrophone: ");
+    Serial.println(settingMicrophone);
 }
 
 void readInputs() {
@@ -182,12 +186,6 @@ void loop() {
 }
 
 
-struct Setting {
-    uint16_t* value;
-    uint16_t max;
-    uint16_t step;
-    bool rollover;
-};
 
 #define MODE_COLOR 0
 #define MODE_RAINBOW 1
@@ -197,19 +195,27 @@ struct Setting {
 #define MODE_RAINBOW_NUM_SETTINGS 3
 #define MODE_WHITE_NUM_SETTINGS 2
 
+struct Setting {
+    int eepromAddress;
+    uint16_t* value;
+    uint16_t max;
+    uint16_t step;
+    bool rollover;
+};
+
 Setting settings[3][4] = {
     { //MODE_COLOR
-        {&settingColorHue, UINT16_MAX, 1024, true}, //hue, 64 steps for full rotation (little more than 3 turns)
-        {&settingColorSaturation, 255, 16, false}, //Saturation, 16 Steps
-        {&settingBrightness, 127, 8, false}, //Value/Brightness, 16 Steps is stored at the same address across modes
-        {&settingMicrophone, 1, 1, false} //Microphone is stored at the same address across modes
+        {SETTING_COLOR_HUE_ADDRESS,        &settingColorHue,        UINT16_MAX, 1024, true }, //hue, 64 steps for full rotation (little more than 3 turns)
+        {SETTING_COLOR_SATURATION_ADDRESS, &settingColorSaturation, 255,        16,   false}, //Saturation, 16 Steps
+        {SETTING_BRIGHTNESS_ADDRESS,       &settingBrightness,      127,        8,    false}, //Value/Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,       &settingMicrophone,      1,          1,    false}  //Microphone is stored at the same address across modes
     }, { //MODE_RAINBOW 
-        {&settingRainbowStep, UINT16_MAX, 8, true}, //Rotation step, rolls over so it can rotate backwards
-        {&settingBrightness, 127, 8, false},//Brightness, 16 Steps is stored at the same address across modes
-        {&settingMicrophone, 1, 1, false} //Microphone is stored at the same address across modes
+        {SETTING_RAINBOW_STEP_ADDRESS, &settingRainbowStep, UINT16_MAX, 8, true }, //Rotation step, rolls over so it can rotate backwards
+        {SETTING_BRIGHTNESS_ADDRESS,   &settingBrightness,  127,        8, false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,   &settingMicrophone,  1,          1, false}  //Microphone is stored at the same address across modes
     }, { //MODE_WHITE 
-        {&settingBrightness, 127, 8, false}, //Brightness, 16 Steps is stored at the same address across modes
-        {&settingMicrophone, 1, 1, false} //Microphone is stored at the same address across modes
+        {SETTING_BRIGHTNESS_ADDRESS, &settingBrightness, 127, 8, false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS, &settingMicrophone, 1,   1, false}  //Microphone is stored at the same address across modes
     }
 };
 
@@ -420,6 +426,7 @@ void updateSetting() {
     }
 
     *s.value = currentValue;
+    eepromWriteUInt16(s.eepromAddress, currentValue);
     redrawLEDs = true;
 
     Serial.print(" -> ");
