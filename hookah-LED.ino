@@ -7,48 +7,49 @@
 #define LED 6
 #define LED_COUNT 13
 #define UPDATE_DELAY 20 //50 Updates/Second
+unsigned long lastUpdate = 0;
 
-#define BUTTON 2
+const double LED_BLINK_BRIGHTNESS_FACTOR = 2.0;
+const double LED_BLINK_RESET_FACTOR = 0.8;
+const double RAINBOW_ACCELERATION_FACTOR = 4;
+
+#define ROTARY_A 7
+#define ROTARY_B 8
+#define BUTTON 9
 #define LONGPRESS_DURATION 250 //ms
-#define ROTARY_A 3
-#define ROTARY_B 4
-#define MICROPHONE 5
+#define MICROPHONE 10
 
 #define DEBOUNCE 50
 
 
-int buttonState = LOW;
-int buttonStatePrevious = LOW;
+int buttonState = HIGH;
 unsigned long buttonPressedSince = 0;
 unsigned long buttonDebounce = 0;
 bool buttonShortPress = false;
 bool buttonLongPress = false;
 
-int rotaryAState = LOW;
+int rotaryAState = HIGH;
 int rotation = 0;
 
 bool microphoneActivated = false;
 bool microphoneListening = false;
 
 Adafruit_NeoPixel strip(LED_COUNT, LED, NEO_GRB + NEO_KHZ800);
+bool redrawLEDs = true;
+
+uint16_t settingBrightness = 0;
+#define SETTING_BRIGHTNESS_ADDRESS 0
 
 uint16_t settingColorHue = 0;
-#define SETTING_COLOR_HUE_ADDRESS 0
+#define SETTING_COLOR_HUE_ADDRESS 2
 uint16_t settingColorSaturation = 0;
-#define SETTING_COLOR_SATURATION_ADDRESS 2
-uint16_t settingColorValue = 0;
-#define SETTING_COLOR_VALUE_ADDRESS 4
+#define SETTING_COLOR_SATURATION_ADDRESS 4
 
 uint16_t settingRainbowStep = 0;
 #define SETTING_RAINBOW_STEP_ADDRESS 6
-uint16_t settingRainbowBrightness = 0;
-#define SETTING_RAINBOW_BRIGHTNESS_ADDRESS 6
-
-uint16_t settingWhiteBrightness = 0;
-#define SETTING_WHITE_BRIGHTNESS_ADDRESS 8
 
 uint16_t settingMicrophone = 0;
-#define SETTING_MICROPHONE_ADDRESS 10
+#define SETTING_MICROPHONE_ADDRESS 8
 
 
 void setup() {
@@ -59,37 +60,47 @@ void setup() {
 
     strip.begin();           
     strip.show();
-    strip.setBrightness(50);
+    strip.setBrightness(100);
 
     //Setup other inputs
-    pinMode(BUTTON, INPUT);
+    pinMode(BUTTON, INPUT_PULLUP);
     pinMode(ROTARY_A, INPUT);
     pinMode(ROTARY_B, INPUT);
     pinMode(MICROPHONE, INPUT);
 
-    //Load Settings from EEPROM
-    settingColorHue = eepromReadUInt16(SETTING_COLOR_HUE_ADDRESS);
-    settingColorSaturation = eepromReadUInt16(SETTING_COLOR_SATURATION_ADDRESS);
-    settingColorValue = eepromReadUInt16(SETTING_COLOR_VALUE_ADDRESS);
+//    //Load Settings from EEPROM
+//    settingBrightness = eepromReadUInt16(SETTING_BRIGHTNESS_ADDRESS);
+//
+//    settingColorHue = eepromReadUInt16(SETTING_COLOR_HUE_ADDRESS);
+//    settingColorSaturation = eepromReadUInt16(SETTING_COLOR_SATURATION_ADDRESS);
+//
+//    settingRainbowStep = eepromReadUInt16(SETTING_RAINBOW_STEP_ADDRESS);
+//
+//    settingMicrophone = eepromReadUInt16(SETTING_MICROPHONE_ADDRESS);
 
-    settingRainbowStep = eepromReadUInt16(SETTING_RAINBOW_STEP_ADDRESS);
-    settingRainbowBrightness = eepromReadUInt16(SETTING_RAINBOW_BRIGHTNESS_ADDRESS);
+    
+    settingBrightness = 127;
 
-    settingWhiteBrightness = eepromReadUInt16(SETTING_WHITE_BRIGHTNESS_ADDRESS);
+    settingColorHue = 0;
+    settingColorSaturation = 255;
 
-    settingMicrophone = eepromReadUInt16(SETTING_MICROPHONE_ADDRESS);
+    settingRainbowStep = 512;
+
+    settingMicrophone = 1;
+
+    Serial.begin(9600);
 }
 
 void readInputs() {
     //Button state changed after debounce timer
-    if(buttonState != digitalRead(BUTTON) && (millis() - buttonDebounce) > DEBOUNCE ) {
+    if((buttonState != digitalRead(BUTTON)) && millis() - buttonDebounce > DEBOUNCE) {
 
         //Start debounce timer so we won't detect a button state change until it has run out
         buttonDebounce = millis();
         buttonState = digitalRead(BUTTON);
 
-        if(buttonState == HIGH) {
-            //Button pressed
+        if(buttonState == LOW) {
+            //Button pressed because INPUT_PULLUP reverses HIGH and LOW
             buttonPressedSince = millis();
         } else {
             //Button released 
@@ -104,54 +115,68 @@ void readInputs() {
         buttonShortPress = false;
         buttonLongPress = false;
     }
+    
+    /*  Rotary encoder
+        States during a clockwise rotation:
+         A   |  B
+        HIGH | HIGH <- Stationary
+        LOW  | HIGH
+        LOW  | LOW 
+        HIGH | LOW 
+        HIGH | HIGH <- Stationary
 
-    /* Rotary encoder
-    Explanation: 
-        both ROTARY_A and ROTARY_B are at the same state when stationary.
-        when rotating clockwise the contact surface touches (and looses contact with) ROTARY_A before ROTARY_B
-        so if ROTARY_A changing and ROTARY_B is still in a different state we are rotating clockwise
+        States during a counterclockwise roation:
+         A   |  B
+        HIGH | HIGH <- Stationary
+        HIGH | LOW 
+        LOW  | LOW 
+        LOW  | HIGH
+        HIGH | HIGH <- Stationary
 
-        Reversing that logic means if we are rotating counterclockwise, 
-        ROTARY_B is changing before the contact surface reaches ROTARY_A.
-        So by the time we check ROTARY_A, ROTARY_B is already at the same state.
-    */    
-    if(rotaryAState != digitalRead(ROTARY_A)) {
-        rotaryAState = digitalRead(ROTARY_A);
-
-        if(rotaryAState != digitalRead(ROTARY_B)) {
+        Observation: when A changes to LOW, B reads HIGH for a clockwise rotation and LOW for a counterclockwise rotation
+    */
+    int stateA = digitalRead(ROTARY_A);
+    if(rotaryAState != stateA && stateA == LOW) { //A changes to LOW
+        if(stateA != digitalRead(ROTARY_B)) { //B reads HIGH
             //Clockwise rotation
             rotation = 1;
-        } else {
+        } else { //B reads LOW
             //Counterclockwise rotation
             rotation = -1;
         }
-
     } else {
         //No change; no rotation
         rotation = 0;
     }
-
+    rotaryAState = stateA;
+    
+    
     //Microphone
-    //Record if the microphone is switched on
-    microphoneActivated = !microphoneListening && digitalRead(MICROPHONE) == HIGH;
+    //Record if the microphone is switched on. The microphone is HIGH when no sound is detected
+    microphoneActivated = !microphoneListening && digitalRead(MICROPHONE) == LOW;
     //Current state of the microphone
-    microphoneListening = digitalRead(MICROPHONE);
+    microphoneListening = digitalRead(MICROPHONE) == LOW;
 }
 
 void loop() {
     readInputs();
     if(buttonLongPress) {
+        Serial.println("cycleMode()");
         cycleMode();
     }
     if(buttonShortPress) {
+        Serial.println("cycleSettings()");
         cycleSettings();
     }
     if(rotation != 0) {
+        Serial.print("updateSetting() ");
+        Serial.println(rotation);
         updateSetting();
     }
 
     //Update the LED Strip at a limited rate
-    if(millis() % UPDATE_DELAY == 0) {
+    if(millis() - lastUpdate > UPDATE_DELAY) {
+        lastUpdate = millis();
         updateLEDs();
     }
 }
@@ -176,14 +201,14 @@ Setting settings[3][4] = {
     { //MODE_COLOR
         {&settingColorHue, UINT16_MAX, 1024, true}, //hue, 64 steps for full rotation (little more than 3 turns)
         {&settingColorSaturation, 255, 16, false}, //Saturation, 16 Steps
-        {&settingColorValue, 255, 16, false}, //Value/Brightness, 16 Steps
+        {&settingBrightness, 127, 8, false}, //Value/Brightness, 16 Steps is stored at the same address across modes
         {&settingMicrophone, 1, 1, false} //Microphone is stored at the same address across modes
     }, { //MODE_RAINBOW 
         {&settingRainbowStep, UINT16_MAX, 8, true}, //Rotation step, rolls over so it can rotate backwards
-        {&settingRainbowBrightness, 255, 16, false},
+        {&settingBrightness, 127, 8, false},//Brightness, 16 Steps is stored at the same address across modes
         {&settingMicrophone, 1, 1, false} //Microphone is stored at the same address across modes
     }, { //MODE_WHITE 
-        {&settingWhiteBrightness, 255, 16, false}, //Brightness (yawn)
+        {&settingBrightness, 127, 8, false}, //Brightness, 16 Steps is stored at the same address across modes
         {&settingMicrophone, 1, 1, false} //Microphone is stored at the same address across modes
     }
 };
@@ -206,26 +231,34 @@ void cycleMode() {
         case MODE_WHITE:
         default:
             currentMode = MODE_COLOR;
-            currentMode = MODE_COLOR_NUM_SETTINGS;
+            currentModeNumSettings = MODE_COLOR_NUM_SETTINGS;
             break;
     }
+    redrawLEDs = true;
+    Serial.print("Switched to mode ");
+    Serial.println(currentMode);
 }
 
 
 void cycleSettings() {
-    currentSetting++;
-    if(currentSetting >= currentModeNumSettings) {
-        currentSetting = 0;
-    }
+    ++currentSetting %= currentModeNumSettings;
+    redrawLEDs = true;
+    Serial.print("Current mode: ");
+    Serial.println(currentMode);
+    Serial.print("Switched to setting ");
+    Serial.println(currentSetting);
 }
 
 void updateLEDs() {
     switch(currentMode) {
         case MODE_COLOR:
+            updateColor();
             break;
         case MODE_RAINBOW:
+            updateRainbow();
             break;
         case MODE_WHITE:
+            updateWhite();
             break;
     }
     indicateSetting();
@@ -234,26 +267,19 @@ void updateLEDs() {
 
 void updateColor() {
     //Only update whole strip when a setting is changed or if we just changed to this mode / exited the settings
-    if(rotation != 0 || buttonLongPress || buttonShortPress) {
-        for(int i = 0; i < strip.numPixels(); i++) {
-            strip.setPixelColor(i, strip.ColorHSV(settingColorHue, settingColorSaturation, settingColorValue));
-        }
+    if(redrawLEDs) {
+        strip.fill(strip.ColorHSV(settingColorHue, settingColorSaturation, settingBrightness));
+        redrawLEDs = false;
     }
 
     if(settingMicrophone == 1) {
         //Gradually reset pixels to original color (only execute if microphone is activated)
-        uint32_t currentColor = strip.ColorHSV(settingColorHue, settingColorSaturation, settingColorValue);
-        for(int i = 0; i < strip.numPixels(); i++) {
-            uint32_t pixelColor = strip.getPixelColor(i);
-            if(pixelColor != currentColor) {
-                strip.setPixelColor(i, graduallyResetColor(pixelColor, currentColor, 0.8));
-            }
-        }
+        uint32_t currentColor = strip.ColorHSV(settingColorHue, settingColorSaturation, settingBrightness);
+        graduallyResetColors(currentColor);
 
         //make a random pixel light up
-        if(microphoneActivated) {
-            uint8_t newBrightness = 255 - (255 - settingColorValue) * 0.5;
-            strip.setPixelColor(random(13), strip.ColorHSV(settingColorHue, settingColorSaturation / 2, settingColorValue * 2));
+        if(microphoneListening) {
+            strip.setPixelColor(random(LED_COUNT), strip.ColorHSV(settingColorHue, settingColorSaturation / 2, settingBrightness * LED_BLINK_BRIGHTNESS_FACTOR));
         } 
     }
 }
@@ -262,13 +288,15 @@ uint16_t rainbowCurrentPosition = 0;
 unsigned long rainbowMicrophoneStart = 0;
 int rainbowMicrophoneDuration = 500;
 void updateRainbow() {
-    if(microphoneListening) {
+    if(settingMicrophone == 1 && microphoneListening) {
         rainbowMicrophoneStart = millis();
     }
 
-    rainbowCurrentPosition += settingRainbowStep;
-    if(millis() - rainbowMicrophoneStart > rainbowMicrophoneDuration) {
+    //increase the hue of the rainbow. When thw varable overflows it starts over, wich is actually convenient
+    if(millis() - rainbowMicrophoneStart < rainbowMicrophoneDuration) {
         //turn another stepwidth if microphon was listening in the last 500ms (turn twice as fast)
+        rainbowCurrentPosition += settingRainbowStep * RAINBOW_ACCELERATION_FACTOR;
+    } else {
         rainbowCurrentPosition += settingRainbowStep;
     }
 
@@ -277,94 +305,125 @@ void updateRainbow() {
     //  1 is halfway from the center
     //  2 is furthest from the center
     //  from then on it is alternating between halfway and furthest.
-    strip.setPixelColor(0, strip.ColorHSV(0,0,settingRainbowBrightness)); //the center is always white
+    strip.setPixelColor(0, strip.ColorHSV(0,0,settingBrightness)); //the center is always white
     for(int i = 1; i < strip.numPixels(); i++) {
         //Pixels furthest from the center are displayed at max saturation while the others are at half saturation
         uint8_t saturation = (i%2 == 0) ? 255 : 127;
-        strip.setPixelColor(0, strip.ColorHSV((UINT16_MAX/12) * i + rainbowCurrentPosition, saturation, settingRainbowBrightness));
+        strip.setPixelColor(i, strip.ColorHSV((UINT16_MAX/12) * i + rainbowCurrentPosition, saturation, settingBrightness));
     }
 }
 
 void updateWhite() {
     //Only update whole strip when a setting is changed or if we just changed to this mode / exited the settings
-    if(rotation != 0 || buttonLongPress || buttonShortPress) {
-        for(int i = 0; i < strip.numPixels(); i++) {
-            strip.setPixelColor(i, strip.ColorHSV(0,0, settingWhiteBrightness)); 
-        }
+    if(redrawLEDs) {
+        strip.fill(strip.Color(settingBrightness,settingBrightness, settingBrightness), 0, LED_COUNT);
+        redrawLEDs = false;
     }
 
     if(settingMicrophone == 1) {
         //Gradually reset pixels to original color (only execute if microphone is activated)
-        uint32_t currentColor = strip.ColorHSV(settingColorHue, settingColorSaturation, settingColorValue);
-        for(int i = 0; i < strip.numPixels(); i++) {
-            uint32_t pixelColor = strip.getPixelColor(i);
-            if(pixelColor != currentColor) {
-                strip.setPixelColor(i, graduallyResetColor(pixelColor, currentColor, 0.8));
-            }
-        }
+        graduallyResetColors(strip.ColorHSV(settingBrightness, settingBrightness, settingBrightness));
 
         //make a random pixel light up
-        if(microphoneActivated) {
-            strip.setPixelColor(random(13), 
-                strip.Color(random(settingWhiteBrightness, 255), 
-                            random(settingWhiteBrightness, 255),
-                            random(settingWhiteBrightness, 255)));
+        if(microphoneListening) {
+            strip.setPixelColor(random(13), strip.ColorHSV(random(UINT16_MAX), 255, settingBrightness * LED_BLINK_BRIGHTNESS_FACTOR));
         } 
     }
 }
 
-const int indicateSettingBlinkFrames = 10;
-bool indicateSettingBlinkOn = true;
-int indicateSettingFrameCounter = 0;
-void indicateSetting() {
-    //Indicate current setting by turning off one LED per settin (sans the 0th Setting (Default setting / quick setting))
-    for(int i = 1; i < currentModeNumSettings; i++) {
-        strip.setPixelColor(i, strip.Color(0,0,0));
-        if(i == currentSetting) {
-            if(indicateSettingBlinkOn) {
-                strip.setPixelColor(i, strip.Color(255,255,255));
+
+void graduallyResetColors(uint32_t targetColor) {
+    uint8_t targetRGB[3];
+    targetRGB[0] = (targetColor & 0x00FF0000) >> 16;
+    targetRGB[1] = (targetColor & 0x0000FF00) >> 8;
+    targetRGB[2] = (targetColor & 0x000000FF);
+    
+    uint8_t pixelRGB[3];
+    uint8_t newColorRGB[3];
+    
+    for(int i=0; i<LED_COUNT; i++) {
+        uint32_t pixelColor = strip.getPixelColor(i);
+        if(pixelColor != targetColor) {
+            pixelRGB[0] = (pixelColor & 0x00FF0000) >> 16;
+            pixelRGB[1] = (pixelColor & 0x0000FF00) >> 8;
+            pixelRGB[2] = (pixelColor & 0x000000FF);
+        
+            for(int j=0; j<3; j++) {
+                int difference = pixelRGB[j] - targetRGB[j];
+                newColorRGB[j] = targetRGB[j] + (difference * LED_BLINK_RESET_FACTOR);
             }
-            if(indicateSettingFrameCounter > indicateSettingBlinkFrames) {
-                indicateSettingFrameCounter = 0;
-                indicateSettingBlinkOn = !indicateSettingBlinkOn;
-            }
-            indicateSettingFrameCounter ++;
+            strip.setPixelColor(i, strip.Color(newColorRGB[0], newColorRGB[1], newColorRGB[2]));
         }
     }
-    //In order to display the microphone setting turn all LEDs off
-    //If the center is green the microphone is on, if it is red the microphone is off
-    if(settings[currentMode][currentSetting].value = &settingMicrophone) {
-        for(int i = currentModeNumSettings; i < strip.numPixels(); i ++ ) {
-            strip.setPixelColor(i, 0x00000000);
-        }
+}
 
-        if(settingMicrophone == 1) {
-            strip.setPixelColor(0, strip.Color(0,255,0));
-        } else if (settingMicrophone == 0) {
-            strip.setPixelColor(0, strip.Color(255,0,0));
+const int indicateSettingBlinkFrames = 10;
+int indicateSettingFrameCounter = 0;
+void indicateSetting() {
+    if(currentSetting != 0) {
+        //Indicate current setting by turning off one LED per setting (sans the 0th Setting (Default setting / quick setting))
+        if(settings[currentMode][currentSetting].value == &settingMicrophone) {
+            //In order to display the microphone setting turn all LEDs off
+            //If the center is green the microphone is on, if it is red the microphone is off
+            strip.fill(strip.Color(0,0,0));
+            if(settingMicrophone == 1) {
+                strip.setPixelColor(0, strip.Color(0,settingBrightness,0));
+            } else if (settingMicrophone == 0) {
+                strip.setPixelColor(0, strip.Color(settingBrightness,0,0));
+            }
+        } else {
+            //for all the other settings just turn off enough LEDs to indicate the current setting
+            strip.fill(strip.Color(0,0,0), 1, currentModeNumSettings - 1);
+        }
+        
+        ++indicateSettingFrameCounter %= indicateSettingBlinkFrames * 2;
+        if(indicateSettingFrameCounter < indicateSettingBlinkFrames) {
+            strip.setPixelColor(currentSetting, strip.ColorHSV(0,0,settingBrightness));
         }
     }
 }
 
 void updateSetting() {
     Setting s = settings[currentMode][currentSetting];
+    Serial.print("Mode: ");
+    Serial.print(currentMode);
+    Serial.print(" Setting: ");
+    Serial.print(currentSetting);
+    Serial.print(" Max: ");
+    Serial.print(s.max);
+    Serial.print(" Value: ");
+    Serial.print(*s.value);
+    Serial.print(" + ");
+    Serial.print(s.step);
+    
+
+    uint32_t currentValue = *s.value;
     if(rotation == 1) {
-        if(s.max - *s.value < s.step) {
+        currentValue += s.step;
+        if(currentValue > s.max) {
             if(s.rollover) {
-                *s.value = s.step - (s.max - *s.value);
+              currentValue -= s.max + 1;
             } else {
-                *s.value = s.max;
+              currentValue = s.max;
             }
         }
     } else if (rotation == -1) {
-        if(*s.value < s.step) {
+        if(currentValue < s.step) {
             if(s.rollover) {
-                *s.value = s.max - (s.step - 1 - *s.value);
+                currentValue = s.max - (s.step - 1 - currentValue);
             } else {
-                *s.value = 0;
+                currentValue = 0;
             }
+        } else {
+            currentValue -= s.step;
         }
     }
+
+    *s.value = currentValue;
+    redrawLEDs = true;
+
+    Serial.print(" -> ");
+    Serial.println(*s.value);
 }
 
 //--HELPER-FUNCTIONS--
@@ -381,30 +440,4 @@ uint16_t eepromReadUInt16(int address) {
     value += EEPROM.read(address + 1);
     
     return value;
-}
-
-uint32_t graduallyResetColor(uint32_t color, uint32_t target, double factor) {
-    uint8_t colorRGBA[4] = {
-            (color & 0x000000FF), 
-            (color & 0x0000FF00) >> 8, 
-            (color & 0x00FF0000) >> 16, 
-            (color & 0xFF000000) >> 24
-        };
-    uint8_t targetRGBA[4] = {
-            (target & 0x000000FF), 
-            (target & 0x0000FF00) >> 8, 
-            (target & 0x00FF0000) >> 16, 
-            (target & 0xFF000000) >> 24
-        };
-
-    uint8_t newColorRGBA[4] = {};
-
-    for(int i=0; i<4; i++) {
-        int difference = colorRGBA[i] - targetRGBA[i];
-        newColorRGBA[i] = targetRGBA[i] + (difference * factor);
-    }
-
-    uint32_t newColor = (newColorRGBA[3] << 24) | (newColorRGBA[2] << 16) | (newColorRGBA[1] << 8) | newColorRGBA[0];
-
-    return newColor;
 }
