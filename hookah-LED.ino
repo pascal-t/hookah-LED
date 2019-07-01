@@ -17,7 +17,7 @@ const double RAINBOW_ACCELERATION_FACTOR = 4;
 #define ROTARY_B 8
 #define BUTTON 9
 #define LONGPRESS_DURATION 500 //ms
-#define MICROPHONE 10
+const int MICROPHONE = A0;
 
 #define DEBOUNCE 50
 
@@ -62,6 +62,9 @@ uint16_t settingMicrophone = 0;
 
 #define MODE_ADDRESS 10
 
+uint16_t settingMicrophoneThreshhold = 0;
+#define SETTING_MICROPHONE_THRESHHOLD_ADDRESS 12
+
 
 void setup() {
     Serial.begin(9600);
@@ -91,6 +94,8 @@ void setup() {
 
     settingMicrophone = eepromReadUInt16(SETTING_MICROPHONE_ADDRESS);
 
+    settingMicrophoneThreshhold = eepromReadUInt16(SETTING_MICROPHONE_THRESHHOLD_ADDRESS);
+
     Serial.println("Loaded settings from EEPROM:");
     setMode(eepromReadUInt16(MODE_ADDRESS));
 
@@ -107,6 +112,9 @@ void setup() {
     
     Serial.print("settingMicrophone: ");
     Serial.println(settingMicrophone);
+
+    Serial.print("settingMicrophoneThreshhold: ");
+    Serial.println(settingMicrophoneThreshhold);
 }
 
 void readInputs() {
@@ -171,9 +179,9 @@ void readInputs() {
     
     //Microphone
     //Record if the microphone is switched on. The microphone is HIGH when no sound is detected
-    microphoneActivated = !microphoneListening && digitalRead(MICROPHONE) == LOW;
+    microphoneActivated = !microphoneListening && analogRead(MICROPHONE) > settingMicrophoneThreshhold;
     //Current state of the microphone
-    microphoneListening = digitalRead(MICROPHONE) == LOW;
+    microphoneListening = analogRead(MICROPHONE) > settingMicrophoneThreshhold;
 }
 
 void loop() {
@@ -205,9 +213,9 @@ void loop() {
 #define MODE_RAINBOW 1
 #define MODE_WHITE 2
 
-#define MODE_COLOR_NUM_SETTINGS 4
-#define MODE_RAINBOW_NUM_SETTINGS 3
-#define MODE_WHITE_NUM_SETTINGS 2
+#define MODE_COLOR_NUM_SETTINGS 5
+#define MODE_RAINBOW_NUM_SETTINGS 4
+#define MODE_WHITE_NUM_SETTINGS 3
 
 struct Setting {
     int eepromAddress;
@@ -217,19 +225,22 @@ struct Setting {
     bool rollover;
 };
 
-Setting settings[3][4] = {
+Setting settings[3][5] = {
     { //MODE_COLOR
-        {SETTING_COLOR_HUE_ADDRESS,        &settingColorHue,        UINT16_MAX, 1024, true }, //hue, 64 steps for full rotation (little more than 3 turns)
-        {SETTING_COLOR_SATURATION_ADDRESS, &settingColorSaturation, 255,        16,   false}, //Saturation, 16 Steps
-        {SETTING_BRIGHTNESS_ADDRESS,       &settingBrightness,      127,        8,    false}, //Value/Brightness, 16 Steps is stored at the same address across modes
-        {SETTING_MICROPHONE_ADDRESS,       &settingMicrophone,      1,          1,    false}  //Microphone is stored at the same address across modes
+        {SETTING_COLOR_HUE_ADDRESS,             &settingColorHue,             UINT16_MAX, 1024, true }, //hue, 64 steps for full rotation (little more than 3 turns)
+        {SETTING_COLOR_SATURATION_ADDRESS,      &settingColorSaturation,      255,        16,   false}, //Saturation, 16 Steps
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           127,        8,    false}, //Value/Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           1,          1,    false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 1023,       1,    false}  //Microphone threshhold is stored at the same address across modes
     }, { //MODE_RAINBOW 
-        {SETTING_RAINBOW_STEP_ADDRESS, &settingRainbowStep, UINT16_MAX, 8, true }, //Rotation step, rolls over so it can rotate backwards
-        {SETTING_BRIGHTNESS_ADDRESS,   &settingBrightness,  127,        8, false}, //Brightness, 16 Steps is stored at the same address across modes
-        {SETTING_MICROPHONE_ADDRESS,   &settingMicrophone,  1,          1, false}  //Microphone is stored at the same address across modes
+        {SETTING_RAINBOW_STEP_ADDRESS,          &settingRainbowStep,          UINT16_MAX, 8, true }, //Rotation step, rolls over so it can rotate backwards
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           127,        8, false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           1,          1, false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 1023,       1, false}  //Microphone threshhold is stored at the same address across modes
     }, { //MODE_WHITE 
-        {SETTING_BRIGHTNESS_ADDRESS, &settingBrightness, 127, 8, false}, //Brightness, 16 Steps is stored at the same address across modes
-        {SETTING_MICROPHONE_ADDRESS, &settingMicrophone, 1,   1, false}  //Microphone is stored at the same address across modes
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           127,  8, false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           1,    1, false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 1023, 1, false}  //Microphone threshhold is stored at the same address across modes
     }
 };
 
@@ -272,6 +283,10 @@ void cycleSettings() {
     Serial.println(currentMode);
     Serial.print("Switched to setting ");
     Serial.println(currentSetting);
+    if(settings[currentMode][currentSetting].value == &settingMicrophoneThreshhold && settingMicrophone == 0) {
+        Serial.println("Microphone deactivated. Skipping threshhold setting.");
+        cycleSettings();
+    }
 }
 
 void updateLEDs() {
@@ -408,6 +423,13 @@ void indicateSetting() {
             } else if (settingMicrophone == 0) {
                 strip.setPixelColor(0, strip.Color(settingBrightness,0,0));
             }
+        } else if(settings[currentMode][currentSetting].value == &settingMicrophoneThreshhold) {
+            //In order to display the microphone threshhold setting turn all LEDs off
+            //If the center LED lights up, the microphone detects input
+            fillPixelsHSV(0,0,0,0,0);
+            if(microphoneListening) {
+                setPixelHSV(0, 0, 0,settingBrightness);
+            }
         } else {
             //for all the other settings just turn off enough LEDs to indicate the current setting
             fillPixelsHSV(0,0,0, 1, currentModeNumSettings - 1);
@@ -415,7 +437,7 @@ void indicateSetting() {
         
         ++indicateSettingFrameCounter %= indicateSettingBlinkFrames * 2;
         if(indicateSettingFrameCounter < indicateSettingBlinkFrames) {
-            strip.setPixelColor(currentSetting, strip.ColorHSV(0,0,settingBrightness));
+            setPixelHSV(currentSetting, 0,0,settingBrightness);
         }
     }
 }
@@ -451,9 +473,6 @@ void updateSetting() {
             } else {
                 currentValue = 0;
             }
-        } else {
-            currentValue -= s.step;
-        }
     }
 
     *s.value = currentValue;
