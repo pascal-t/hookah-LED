@@ -1,4 +1,7 @@
-#include <EEPROM.h>
+#include "include/Button.h"
+#include "include/RotaryEncoder.h"
+#include "include/Microphone.h"
+#include "include/EEPROMUtils.h"
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
  #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
@@ -13,27 +16,9 @@ const double LED_BLINK_BRIGHTNESS_FACTOR = 2.0;
 const double LED_BLINK_RESET_FACTOR = 0.95;
 const double RAINBOW_ACCELERATION_FACTOR = 4;
 
-#define ROTARY_A 7
-#define ROTARY_B 8
-#define BUTTON 9
-#define LONGPRESS_DURATION 500 //ms
-const int MICROPHONE = A0;
-
-#define DEBOUNCE 50
-
-
-int buttonState = HIGH;
-unsigned long buttonPressedSince = 0;
-unsigned long buttonDebounce = 0;
-bool buttonShortPress = false;
-bool buttonLongPress = false;
-bool buttonSentLongPress = false;
-
-int rotaryAState = HIGH;
-int rotation = 0;
-
-bool microphoneActivated = false;
-bool microphoneListening = false;
+Button button(9, 500, INPUT_PULLUP);
+RotaryEncoder rotary(7,8);
+Microphone microphone(A0);
 
 Adafruit_NeoPixel strip(LED_COUNT, LED, NEO_GRB + NEO_KHZ800);
 bool redrawLEDs = true;
@@ -78,26 +63,20 @@ void setup() {
     strip.show();
     strip.setBrightness(100);
 
-    //Setup other inputs
-    pinMode(BUTTON, INPUT_PULLUP);
-    pinMode(ROTARY_A, INPUT);
-    pinMode(ROTARY_B, INPUT);
-    pinMode(MICROPHONE, INPUT);
-
     //Load Settings from EEPROM
-    settingBrightness = eepromReadUInt16(SETTING_BRIGHTNESS_ADDRESS);
+    settingBrightness = EEPROMUtils::readUInt16(SETTING_BRIGHTNESS_ADDRESS);
 
-    settingColorHue = eepromReadUInt16(SETTING_COLOR_HUE_ADDRESS);
-    settingColorSaturation = eepromReadUInt16(SETTING_COLOR_SATURATION_ADDRESS);
+    settingColorHue = EEPROMUtils::readUInt16(SETTING_COLOR_HUE_ADDRESS);
+    settingColorSaturation = EEPROMUtils::readUInt16(SETTING_COLOR_SATURATION_ADDRESS);
 
-    settingRainbowStep = eepromReadUInt16(SETTING_RAINBOW_STEP_ADDRESS);
+    settingRainbowStep = EEPROMUtils::readUInt16(SETTING_RAINBOW_STEP_ADDRESS);
 
-    settingMicrophone = eepromReadUInt16(SETTING_MICROPHONE_ADDRESS);
+    settingMicrophone = EEPROMUtils::readUInt16(SETTING_MICROPHONE_ADDRESS);
 
-    settingMicrophoneThreshhold = eepromReadUInt16(SETTING_MICROPHONE_THRESHHOLD_ADDRESS);
+    settingMicrophoneThreshhold = EEPROMUtils::readUInt16(SETTING_MICROPHONE_THRESHHOLD_ADDRESS);
 
     Serial.println("Loaded settings from EEPROM:");
-    setMode(eepromReadUInt16(MODE_ADDRESS));
+    setMode(EEPROMUtils::readUInt16(MODE_ADDRESS));
 
     Serial.print("settingBrightness: ");
     Serial.println(settingBrightness);
@@ -115,88 +94,28 @@ void setup() {
 
     Serial.print("settingMicrophoneThreshhold: ");
     Serial.println(settingMicrophoneThreshhold);
+    microphone.setThreshhold(settingMicrophoneThreshhold);
 }
 
 void readInputs() {
-    //Button state changed after debounce timer
-    if((buttonState != digitalRead(BUTTON)) && millis() - buttonDebounce > DEBOUNCE) {
-
-        //Start debounce timer so we won't detect a button state change until it has run out
-        buttonDebounce = millis();
-        buttonState = digitalRead(BUTTON);
-
-        if(buttonState == LOW) {
-            //Button pressed because INPUT_PULLUP reverses HIGH and LOW
-            buttonPressedSince = millis();
-        } else {
-            //Button released 
-            if((millis() - buttonPressedSince) >= LONGPRESS_DURATION) {
-                buttonLongPress = true;
-            } else {
-                buttonShortPress = true;
-            }
-        }
-    } else {
-        //no button press to report
-        buttonShortPress = false;
-        buttonLongPress = false;
-    }
-    
-    /*  Rotary encoder
-        States during a clockwise rotation:
-         A   |  B
-        HIGH | HIGH <- Stationary
-        LOW  | HIGH
-        LOW  | LOW 
-        HIGH | LOW 
-        HIGH | HIGH <- Stationary
-
-        States during a counterclockwise roation:
-         A   |  B
-        HIGH | HIGH <- Stationary
-        HIGH | LOW 
-        LOW  | LOW 
-        LOW  | HIGH
-        HIGH | HIGH <- Stationary
-
-        Observation: when A changes to LOW, B reads HIGH for a clockwise rotation and LOW for a counterclockwise rotation
-    */
-    int stateA = digitalRead(ROTARY_A);
-    if(rotaryAState != stateA && stateA == LOW) { //A changes to LOW
-        if(stateA != digitalRead(ROTARY_B)) { //B reads HIGH
-            //Clockwise rotation
-            rotation = 1;
-        } else { //B reads LOW
-            //Counterclockwise rotation
-            rotation = -1;
-        }
-    } else {
-        //No change; no rotation
-        rotation = 0;
-    }
-    rotaryAState = stateA;
-    
-    
-    //Microphone
-    //Record if the microphone is switched on. The microphone is HIGH when no sound is detected
-    microphoneActivated = !microphoneListening && analogRead(MICROPHONE) > settingMicrophoneThreshhold;
-    //Current state of the microphone
-    microphoneListening = analogRead(MICROPHONE) > settingMicrophoneThreshhold;
+    button.read();
+    rotary.read();
+    microphone.read();
 }
 
 void loop() {
     readInputs();
-    if(buttonLongPress) {
+    if(button.isLongPress()) {
         Serial.println("cycleMode()");
         cycleMode();
     }
-    if(buttonShortPress) {
+    if(button.isShortPress()) {
         Serial.println("cycleSettings()");
         cycleSettings();
     }
-    if(rotation != 0) {
+    if(rotary.getRotation() != 0) {
         Serial.print("updateSetting() ");
-        Serial.println(rotation);
+        Serial.println(rotary.getRotation());
         updateSetting();
     }
 
@@ -206,8 +125,6 @@ void loop() {
         updateLEDs();
     }
 }
-
-
 
 #define MODE_COLOR 0
 #define MODE_RAINBOW 1
@@ -270,7 +187,7 @@ void setMode(int mode) {
     }
     Serial.print("Switched to mode ");
     Serial.println(currentMode);
-    eepromWriteUInt16(MODE_ADDRESS, currentMode);
+    EEPROMUtils::writeUInt16(MODE_ADDRESS, currentMode);
     currentSetting = 0;
     redrawLEDs = true;
 }
@@ -312,27 +229,11 @@ void graduallyResetColors(uint16_t hue, uint8_t saturation, uint8_t value, uint1
     
     for(int i=start; i<start+c; i++) {
         hsvColor pixelColor = getPixelHSV(i);
-        if(pixelColor.hue        != hue 
-        || pixelColor.saturation != saturation
+        if(pixelColor.saturation != saturation
         || pixelColor.value      != value) {
         
-            //the hue overflows from 
-            if(hue > pixelColor.hue) {
-                uint16_t difference = hue - pixelColor.hue;
-                if(difference < 0x8000) {
-                    newColor.hue = hue - difference * LED_BLINK_RESET_FACTOR;
-                } else {
-                    newColor.hue = hue + (difference % 0x8000) * LED_BLINK_RESET_FACTOR;  
-                }
-            } else {
-                uint16_t difference = pixelColor.hue - hue;
-                if(difference < 0x8000) {
-                    newColor.hue = hue + difference * LED_BLINK_RESET_FACTOR;
-                } else {
-                    newColor.hue = hue - (difference % 0x8000) * LED_BLINK_RESET_FACTOR;  
-                }
-            }
-
+            //there is no use case for resetting the hue of a color, so I will spare myself the unreadable algorithm  
+            newColor.hue = hue;
             newColor.saturation = saturation + (pixelColor.saturation - saturation) * LED_BLINK_RESET_FACTOR;
             newColor.value = value + (pixelColor.value - value) * LED_BLINK_RESET_FACTOR;
 
@@ -354,7 +255,7 @@ void updateColor() {
         graduallyResetColors(settingColorHue, settingColorSaturation, settingBrightness);
 
         //make a random pixel light up
-        if(microphoneListening) {
+        if(microphone.isActivated()) {
             setPixelHSV(random(LED_COUNT), settingColorHue, settingColorSaturation / 2, settingBrightness * LED_BLINK_BRIGHTNESS_FACTOR);
         } 
     }
@@ -364,7 +265,7 @@ uint16_t rainbowCurrentPosition = 0;
 unsigned long rainbowMicrophoneStart = 0;
 int rainbowMicrophoneDuration = 500;
 void updateRainbow() {
-    if(settingMicrophone == 1 && microphoneListening) {
+    if(microphone.isActivated()) {
         rainbowMicrophoneStart = millis();
     }
 
@@ -403,7 +304,7 @@ void updateWhite() {
         }
 
         //make a random pixel light up
-        if(microphoneListening) {
+        if(microphone.isActivated()) {
             setPixelHSV(random(13), random(UINT16_MAX), 255, settingBrightness * LED_BLINK_BRIGHTNESS_FACTOR);
         } 
     }
@@ -424,10 +325,11 @@ void indicateSetting() {
                 strip.setPixelColor(0, strip.Color(settingBrightness,0,0));
             }
         } else if(settings[currentMode][currentSetting].value == &settingMicrophoneThreshhold) {
+            microphone.setThreshhold(settingMicrophoneThreshhold);
             //In order to display the microphone threshhold setting turn all LEDs off
             //If the center LED lights up, the microphone detects input
             fillPixelsHSV(0,0,0,0,0);
-            if(microphoneListening) {
+            if(microphone.isActivated()) {
                 setPixelHSV(0, 0, 0,settingBrightness);
             }
         } else {
@@ -452,12 +354,10 @@ void updateSetting() {
     Serial.print(s.max);
     Serial.print(" Value: ");
     Serial.print(*s.value);
-    Serial.print(" + ");
-    Serial.print(s.step);
-    
 
     uint32_t currentValue = *s.value;
-    if(rotation == 1) {
+    if(rotary.getRotation() > 0) {
+        Serial.print(" + ");
         currentValue += s.step;
         if(currentValue > s.max) {
             if(s.rollover) {
@@ -466,17 +366,19 @@ void updateSetting() {
               currentValue = s.max;
             }
         }
-    } else if (rotation == -1) {
+    } else if (rotary.getRotation() < 0) {
+        Serial.print(" - ");
         if(currentValue < s.step) {
             if(s.rollover) {
                 currentValue = s.max - (s.step - 1 - currentValue);
             } else {
                 currentValue = 0;
             }
+        }
     }
 
     *s.value = currentValue;
-    eepromWriteUInt16(s.eepromAddress, currentValue);
+    EEPROMUtils::writeUInt16(s.eepromAddress, currentValue);
     redrawLEDs = true;
 
     Serial.print(" -> ");
@@ -513,19 +415,4 @@ void fillPixelsHSV(hsvColor color, uint16_t start, uint16_t count) {
 
 hsvColor getPixelHSV(uint16_t index) {
     return LED_HSV_COLORS[index];
-}
-
-void eepromWriteUInt16(int address, uint16_t value) {
-    uint8_t b1 = ((value >> 8) & 0xFF);
-    uint8_t b2 = (value & 0xFF);
-
-    EEPROM.update(address, b1);
-    EEPROM.update(address+1, b2);
-}
-
-uint16_t eepromReadUInt16(int address) {
-    uint16_t value = EEPROM.read(address) << 8;
-    value += EEPROM.read(address + 1);
-    
-    return value;
 }
