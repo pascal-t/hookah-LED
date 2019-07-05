@@ -1,7 +1,8 @@
-#include "include/Button.h"
-#include "include/RotaryEncoder.h"
-#include "include/Microphone.h"
-#include "include/EEPROMUtils.h"
+#include <Arduino.h>
+#include "Button.h"
+#include "RotaryEncoder.h"
+#include "Microphone.h"
+#include "EEPROMUtils.h"
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
  #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
@@ -64,19 +65,19 @@ void setup() {
     strip.setBrightness(100);
 
     //Load Settings from EEPROM
-    settingBrightness = EEPROMUtils::readUInt16(SETTING_BRIGHTNESS_ADDRESS);
+    settingBrightness = EEPROMUtils.readUInt16(SETTING_BRIGHTNESS_ADDRESS);
 
-    settingColorHue = EEPROMUtils::readUInt16(SETTING_COLOR_HUE_ADDRESS);
-    settingColorSaturation = EEPROMUtils::readUInt16(SETTING_COLOR_SATURATION_ADDRESS);
+    settingColorHue = EEPROMUtils.readUInt16(SETTING_COLOR_HUE_ADDRESS);
+    settingColorSaturation = EEPROMUtils.readUInt16(SETTING_COLOR_SATURATION_ADDRESS);
 
-    settingRainbowStep = EEPROMUtils::readUInt16(SETTING_RAINBOW_STEP_ADDRESS);
+    settingRainbowStep = EEPROMUtils.readUInt16(SETTING_RAINBOW_STEP_ADDRESS);
 
-    settingMicrophone = EEPROMUtils::readUInt16(SETTING_MICROPHONE_ADDRESS);
+    settingMicrophone = EEPROMUtils.readUInt16(SETTING_MICROPHONE_ADDRESS);
 
-    settingMicrophoneThreshhold = EEPROMUtils::readUInt16(SETTING_MICROPHONE_THRESHHOLD_ADDRESS);
+    settingMicrophoneThreshhold = EEPROMUtils.readUInt16(SETTING_MICROPHONE_THRESHHOLD_ADDRESS);
 
     Serial.println("Loaded settings from EEPROM:");
-    setMode(EEPROMUtils::readUInt16(MODE_ADDRESS));
+    setMode(EEPROMUtils.readUInt16(MODE_ADDRESS));
 
     Serial.print("settingBrightness: ");
     Serial.println(settingBrightness);
@@ -187,7 +188,7 @@ void setMode(int mode) {
     }
     Serial.print("Switched to mode ");
     Serial.println(currentMode);
-    EEPROMUtils::writeUInt16(MODE_ADDRESS, currentMode);
+    EEPROMUtils.writeUInt16(MODE_ADDRESS, currentMode);
     currentSetting = 0;
     redrawLEDs = true;
 }
@@ -285,8 +286,7 @@ void updateRainbow() {
     setPixelHSV(0, 0,0,settingBrightness); //the center is always white
     for(int i = 1; i < strip.numPixels(); i++) {
         //Pixels furthest from the center are displayed at max saturation while the others are at half saturation
-        uint8_t saturation = (i%2 == 0) ? 255 : 127;
-        setPixelHSV(i, (UINT16_MAX/12) * i + rainbowCurrentPosition, saturation, settingBrightness);
+        setPixelHSV(i, (UINT16_MAX/12) * i + rainbowCurrentPosition, 255, settingBrightness);
     }
 }
 
@@ -374,11 +374,13 @@ void updateSetting() {
             } else {
                 currentValue = 0;
             }
+        } else {
+            currentValue -= s.step;
         }
     }
 
     *s.value = currentValue;
-    EEPROMUtils::writeUInt16(s.eepromAddress, currentValue);
+    EEPROMUtils.writeUInt16(s.eepromAddress, currentValue);
     redrawLEDs = true;
 
     Serial.print(" -> ");
