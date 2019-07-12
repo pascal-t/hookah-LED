@@ -10,7 +10,7 @@ Button::Button(int pin, int longPressDuration, int mode=INPUT) {
 }
 
 void Button::read() {
-    if(millis() - _debounce > BUTTON_DEBOUNCE) {
+    if(millis() - _pressedSince > BUTTON_DEBOUNCE) {
         int state = digitalRead(_pin);
         if(state != _last) { //Button state changed
             _debounce = millis(); //delay next read on state change to avoid reading the "bouncing" of the button
@@ -46,5 +46,3 @@ bool Button::isShortPress() {
 bool Button::isLongPress() {
     return _longPress;
 }
-
-

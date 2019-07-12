@@ -139,24 +139,13 @@ void readInputs() {
 void loop() {
     readInputs();
 
-    if(currentSetting == 0) {
-        if(button.isShortPress()) {
-            Serial.println("Changing mode");
-            cycleMode();
-        }
-        if(button.isLongPress()) {
-            Serial.println("Switching to settings");
-            cycleSettings();
-        }
-    } else {
-        if(button.isShortPress()) {
-            Serial.println("Changing setting");
-            cycleSettings();
-        }
-        if(button.isLongPress()) {
-            Serial.println("Switching to modes");
-            currentSetting = 0;
-        }
+    if(button.isShortPress()) {
+      Serial.println("Changing setting");
+      cycleSettings();
+    }
+    if(button.isLongPress()) {
+      Serial.println("Changing mode");
+      cycleMode();
     }
 
     if(rotary.getRotation() != 0) {
@@ -210,6 +199,7 @@ void setMode(int mode) {
         case MODE_FADE:
             currentMode = MODE_FADE;
             currentModeNumSettings = MODE_FADE_NUM_SETTINGS;
+            break;
         case MODE_WHITE:
             currentMode = MODE_WHITE;
             currentModeNumSettings = MODE_WHITE_NUM_SETTINGS;
