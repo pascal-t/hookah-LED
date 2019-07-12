@@ -16,6 +16,7 @@ unsigned long lastUpdate = 0;
 const double LED_BLINK_BRIGHTNESS_FACTOR = 2.0;
 const double LED_BLINK_RESET_FACTOR = 0.95;
 const double RAINBOW_ACCELERATION_FACTOR = 4;
+const double WHITE_DIM = 0.66; //Dim the LEDs in white mode, since it is the only time all Colors of one LED are lit up
 
 Button button(10, 500, INPUT_PULLUP);
 RotaryEncoder rotary(14,16);
@@ -30,18 +31,44 @@ struct hsvColor {
     uint8_t value = 0;
 };
 
+struct Setting {
+    int eepromAddress;
+    uint16_t* value;
+    uint16_t min;
+    uint16_t max;
+    uint16_t step;
+    bool rollover;
+};
+
 hsvColor LED_HSV_COLORS[LED_COUNT];
+
+#define MODE_COLOR 0
+#define MODE_RAINBOW 1
+#define MODE_FADE 2
+#define MODE_WHITE 3
+
+#define MODE_COLOR_NUM_SETTINGS 5
+#define MODE_RAINBOW_NUM_SETTINGS 4
+#define MODE_FADE_NUM_SETTINGS 5
+#define MODE_WHITE_NUM_SETTINGS 3
+
+int currentMode = MODE_COLOR;
+int currentModeNumSettings = MODE_COLOR_NUM_SETTINGS;
+int currentSetting = 0;
 
 uint16_t settingBrightness = 0;
 #define SETTING_BRIGHTNESS_ADDRESS 0
+uint16_t settingSaturation = 0;
+#define SETTING_SATURATION_ADDRESS 4
 
 uint16_t settingColorHue = 0;
 #define SETTING_COLOR_HUE_ADDRESS 2
-uint16_t settingColorSaturation = 0;
-#define SETTING_COLOR_SATURATION_ADDRESS 4
 
 uint16_t settingRainbowStep = 0;
 #define SETTING_RAINBOW_STEP_ADDRESS 6
+
+uint16_t settingFadeStep = 0;
+#define SETTING_FADE_STEP_ADDRESS 14
 
 uint16_t settingMicrophone = 0;
 #define SETTING_MICROPHONE_ADDRESS 8
@@ -62,15 +89,17 @@ void setup() {
 
     strip.begin();           
     strip.show();
-    strip.setBrightness(100);
+    strip.setBrightness(150);
 
     //Load Settings from EEPROM
     settingBrightness = EEPROMUtils.readUInt16(SETTING_BRIGHTNESS_ADDRESS);
+    settingSaturation = EEPROMUtils.readUInt16(SETTING_SATURATION_ADDRESS);
 
     settingColorHue = EEPROMUtils.readUInt16(SETTING_COLOR_HUE_ADDRESS);
-    settingColorSaturation = EEPROMUtils.readUInt16(SETTING_COLOR_SATURATION_ADDRESS);
 
     settingRainbowStep = EEPROMUtils.readUInt16(SETTING_RAINBOW_STEP_ADDRESS);
+
+    settingFadeStep = EEPROMUtils.readUInt16(SETTING_FADE_STEP_ADDRESS);
 
     settingMicrophone = EEPROMUtils.readUInt16(SETTING_MICROPHONE_ADDRESS);
 
@@ -81,14 +110,17 @@ void setup() {
 
     Serial.print("settingBrightness: ");
     Serial.println(settingBrightness);
+    Serial.print("settingSaturation: ");
+    Serial.println(settingSaturation);
 
     Serial.print("settingColorHue: ");
     Serial.println(settingColorHue);
-    Serial.print("settingColorSaturation: ");
-    Serial.println(settingColorSaturation);
     
     Serial.print("settingRainbowStep: ");
     Serial.println(settingRainbowStep);
+
+    Serial.print("settingFadeStep: ");
+    Serial.println(settingFadeStep);
     
     Serial.print("settingMicrophone: ");
     Serial.println(settingMicrophone);
@@ -106,14 +138,27 @@ void readInputs() {
 
 void loop() {
     readInputs();
-    if(button.isLongPress()) {
-        Serial.println("cycleMode()");
-        cycleMode();
+
+    if(currentSetting == 0) {
+        if(button.isShortPress()) {
+            Serial.println("Changing mode");
+            cycleMode();
+        }
+        if(button.isLongPress()) {
+            Serial.println("Switching to settings");
+            cycleSettings();
+        }
+    } else {
+        if(button.isShortPress()) {
+            Serial.println("Changing setting");
+            cycleSettings();
+        }
+        if(button.isLongPress()) {
+            Serial.println("Switching to modes");
+            currentSetting = 0;
+        }
     }
-    if(button.isShortPress()) {
-        Serial.println("cycleSettings()");
-        cycleSettings();
-    }
+
     if(rotary.getRotation() != 0) {
         Serial.print("updateSetting() ");
         Serial.println(rotary.getRotation());
@@ -127,44 +172,30 @@ void loop() {
     }
 }
 
-#define MODE_COLOR 0
-#define MODE_RAINBOW 1
-#define MODE_WHITE 2
-
-#define MODE_COLOR_NUM_SETTINGS 5
-#define MODE_RAINBOW_NUM_SETTINGS 4
-#define MODE_WHITE_NUM_SETTINGS 3
-
-struct Setting {
-    int eepromAddress;
-    uint16_t* value;
-    uint16_t max;
-    uint16_t step;
-    bool rollover;
-};
-
-Setting settings[3][5] = {
+Setting settings[4][5] = {
     { //MODE_COLOR
-        {SETTING_COLOR_HUE_ADDRESS,             &settingColorHue,             UINT16_MAX, 1024, true }, //hue, 64 steps for full rotation (little more than 3 turns)
-        {SETTING_COLOR_SATURATION_ADDRESS,      &settingColorSaturation,      255,        16,   false}, //Saturation, 16 Steps
-        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           127,        8,    false}, //Value/Brightness, 16 Steps is stored at the same address across modes
-        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           1,          1,    false}, //Microphone is stored at the same address across modes
-        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 1023,       1,    false}  //Microphone threshhold is stored at the same address across modes
+        {SETTING_COLOR_HUE_ADDRESS,             &settingColorHue,             0,   UINT16_MAX, 1024, true }, //hue, 64 steps for full rotation (little more than 3 turns)
+        {SETTING_SATURATION_ADDRESS,            &settingSaturation,           65,  255,        16,   false}, //Saturation, 16 Steps
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           31,  127,        8,    false}, //Value/Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           0,   1,          1,    false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 400, 1023,       1,    false}  //Microphone threshhold is stored at the same address across modes
     }, { //MODE_RAINBOW 
-        {SETTING_RAINBOW_STEP_ADDRESS,          &settingRainbowStep,          UINT16_MAX, 8, true }, //Rotation step, rolls over so it can rotate backwards
-        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           127,        8, false}, //Brightness, 16 Steps is stored at the same address across modes
-        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           1,          1, false}, //Microphone is stored at the same address across modes
-        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 1023,       1, false}  //Microphone threshhold is stored at the same address across modes
+        {SETTING_RAINBOW_STEP_ADDRESS,          &settingRainbowStep,          0,   UINT16_MAX, 8, true }, //Rotation step, rolls over so it can rotate backwards
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           31,  127,        8, false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           0,   1,          1, false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 400, 1023,       1, false}  //Microphone threshhold is stored at the same address across modes
+    }, { //MODE_FADE
+        {SETTING_FADE_STEP_ADDRESS,             &settingFadeStep,             0,   UINT16_MAX, 16, true }, //FadeStep, how far the Hue changes when smoking
+        {SETTING_SATURATION_ADDRESS,            &settingSaturation,           65,  255,        16, false}, //Saturation, 16 Steps is stored at the same address across modes
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           31,  127,        8,  false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           0,   1,          1,  false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 400, 1023,       1,  false}  //Microphone threshhold is stored at the same address across modes
     }, { //MODE_WHITE 
-        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           127,  8, false}, //Brightness, 16 Steps is stored at the same address across modes
-        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           1,    1, false}, //Microphone is stored at the same address across modes
-        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 1023, 1, false}  //Microphone threshhold is stored at the same address across modes
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           31,  127,  8, false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           0,   1,    1, false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 400, 1023, 1, false}  //Microphone threshhold is stored at the same address across modes
     }
 };
-
-int currentMode = MODE_COLOR;
-int currentModeNumSettings = MODE_COLOR_NUM_SETTINGS;
-int currentSetting = 0;
 
 void cycleMode() {
     setMode(currentMode+1);
@@ -176,6 +207,9 @@ void setMode(int mode) {
             currentMode = MODE_RAINBOW;
             currentModeNumSettings = MODE_RAINBOW_NUM_SETTINGS;
             break;
+        case MODE_FADE:
+            currentMode = MODE_FADE;
+            currentModeNumSettings = MODE_FADE_NUM_SETTINGS;
         case MODE_WHITE:
             currentMode = MODE_WHITE;
             currentModeNumSettings = MODE_WHITE_NUM_SETTINGS;
@@ -215,6 +249,9 @@ void updateLEDs() {
         case MODE_RAINBOW:
             updateRainbow();
             break;
+        case MODE_FADE:
+            updateFade();
+            break;
         case MODE_WHITE:
             updateWhite();
             break;
@@ -246,18 +283,17 @@ void graduallyResetColors(uint16_t hue, uint8_t saturation, uint8_t value, uint1
 void updateColor() {
     //Only update whole strip when a setting is changed or if we just changed to this mode / exited the settings
     if(redrawLEDs) {
-        fillPixelsHSV(settingColorHue, settingColorSaturation, settingBrightness, 0, 0);
+        fillPixelsHSV(settingColorHue, settingSaturation, settingBrightness, 0, 0);
         redrawLEDs = false;
     }
 
     if(settingMicrophone == 1) {
         //Gradually reset pixels to original color (only execute if microphone is activated)
-        uint32_t currentColor = strip.ColorHSV(settingColorHue, settingColorSaturation, settingBrightness);
-        graduallyResetColors(settingColorHue, settingColorSaturation, settingBrightness);
+        graduallyResetColors(settingColorHue, settingSaturation, settingBrightness);
 
         //make a random pixel light up
         if(microphone.isActivated()) {
-            setPixelHSV(random(LED_COUNT), settingColorHue, settingColorSaturation / 2, settingBrightness * LED_BLINK_BRIGHTNESS_FACTOR);
+            setPixelHSV(random(LED_COUNT), settingColorHue, settingSaturation / 2, settingBrightness * LED_BLINK_BRIGHTNESS_FACTOR);
         } 
     }
 }
@@ -266,16 +302,18 @@ uint16_t rainbowCurrentPosition = 0;
 unsigned long rainbowMicrophoneStart = 0;
 int rainbowMicrophoneDuration = 500;
 void updateRainbow() {
-    if(microphone.isActivated()) {
-        rainbowMicrophoneStart = millis();
-    }
+    if(settingMicrophone == 1) {
+        if(microphone.isActivated()) {
+            rainbowMicrophoneStart = millis();
+        }
 
-    //increase the hue of the rainbow. When thw varable overflows it starts over, wich is actually convenient
-    if(millis() - rainbowMicrophoneStart < rainbowMicrophoneDuration) {
-        //turn another stepwidth if microphon was listening in the last 500ms (turn twice as fast)
-        rainbowCurrentPosition += settingRainbowStep * RAINBOW_ACCELERATION_FACTOR;
-    } else {
-        rainbowCurrentPosition += settingRainbowStep;
+        //increase the hue of the rainbow. When thw varable overflows it starts over, wich is actually convenient
+        if(millis() - rainbowMicrophoneStart < rainbowMicrophoneDuration) {
+            //turn another stepwidth if microphon was listening in the last 500ms (turn twice as fast)
+            rainbowCurrentPosition += settingRainbowStep * RAINBOW_ACCELERATION_FACTOR;
+        } else {
+            rainbowCurrentPosition += settingRainbowStep;
+        }
     }
 
     //Pixels are positioned as follows: 
@@ -290,17 +328,29 @@ void updateRainbow() {
     }
 }
 
+uint16_t fadeHue = 0;
+void updateFade() {
+    if(settingMicrophone == 1) {
+        //make all pixels change color around the color wheel
+        if(microphone.isActivated() ) {
+            fadeHue += settingFadeStep;
+        } 
+    }
+    
+    fillPixelsHSV(fadeHue, settingSaturation, settingBrightness, 0, 0);
+}
+
 void updateWhite() {
     //Only update whole strip when a setting is changed or if we just changed to this mode / exited the settings
     if(redrawLEDs) {
-        fillPixelsHSV(0, 0, settingBrightness, 0, 0);
+        fillPixelsHSV(0, 0, settingBrightness * WHITE_DIM, 0, 0);
         redrawLEDs = false;
     }
 
     if(settingMicrophone == 1) {
         //Gradually reset pixels to original color (only execute if microphone is activated)
         for(int i = 0; i < LED_COUNT; i++) {
-            graduallyResetColors(getPixelHSV(i).hue, 0, settingBrightness, i, 1);
+            graduallyResetColors(getPixelHSV(i).hue, 0, settingBrightness * WHITE_DIM, i, 1);
         }
 
         //make a random pixel light up
@@ -361,18 +411,18 @@ void updateSetting() {
         currentValue += s.step;
         if(currentValue > s.max) {
             if(s.rollover) {
-              currentValue -= s.max + 1;
+              currentValue -= (s.max - s.min) + 1;
             } else {
               currentValue = s.max;
             }
         }
     } else if (rotary.getRotation() < 0) {
         Serial.print(" - ");
-        if(currentValue < s.step) {
+        if(currentValue < s.min + s.step) {
             if(s.rollover) {
-                currentValue = s.max - (s.step - 1 - currentValue);
+                currentValue = s.max - (s.step - 1 - (currentValue-s.min));
             } else {
-                currentValue = 0;
+                currentValue = s.min;
             }
         } else {
             currentValue -= s.step;
