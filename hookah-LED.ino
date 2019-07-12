@@ -8,7 +8,7 @@
  #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
 #endif
 
-#define LED 6
+#define LED 9
 #define LED_COUNT 13
 #define UPDATE_DELAY 20 //50 Updates/Second
 unsigned long lastUpdate = 0;
@@ -17,8 +17,8 @@ const double LED_BLINK_BRIGHTNESS_FACTOR = 2.0;
 const double LED_BLINK_RESET_FACTOR = 0.95;
 const double RAINBOW_ACCELERATION_FACTOR = 4;
 
-Button button(9, 500, INPUT_PULLUP);
-RotaryEncoder rotary(7,8);
+Button button(10, 500, INPUT_PULLUP);
+RotaryEncoder rotary(14,16);
 Microphone microphone(A0);
 
 Adafruit_NeoPixel strip(LED_COUNT, LED, NEO_GRB + NEO_KHZ800);
