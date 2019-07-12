@@ -46,11 +46,13 @@ hsvColor LED_HSV_COLORS[LED_COUNT];
 #define MODE_RAINBOW 1
 #define MODE_FADE 2
 #define MODE_WHITE 3
+#define MODE_CONCENTRIC 4
 
 #define MODE_COLOR_NUM_SETTINGS 5
 #define MODE_RAINBOW_NUM_SETTINGS 4
 #define MODE_FADE_NUM_SETTINGS 5
 #define MODE_WHITE_NUM_SETTINGS 3
+#define MODE_CONCENTRIC_NUM_SETTINGS 6
 
 int currentMode = MODE_COLOR;
 int currentModeNumSettings = MODE_COLOR_NUM_SETTINGS;
@@ -69,6 +71,12 @@ uint16_t settingRainbowStep = 0;
 
 uint16_t settingFadeStep = 0;
 #define SETTING_FADE_STEP_ADDRESS 14
+
+uint16_t settingConcentricRange = 0;
+#define SETTING_CONCENTRIC_RANGE_ADDRESS 16
+
+uint16_t settingConcentricStep = 0;
+#define SETTING_CONCENTRIC_STEP_ADDRESS 18
 
 uint16_t settingMicrophone = 0;
 #define SETTING_MICROPHONE_ADDRESS 8
@@ -101,6 +109,9 @@ void setup() {
 
     settingFadeStep = EEPROMUtils.readUInt16(SETTING_FADE_STEP_ADDRESS);
 
+    settingConcentricRange = EEPROMUtils.readUInt16(SETTING_CONCENTRIC_RANGE_ADDRESS);
+    settingConcentricStep = EEPROMUtils.readUInt16(SETTING_CONCENTRIC_STEP_ADDRESS);
+
     settingMicrophone = EEPROMUtils.readUInt16(SETTING_MICROPHONE_ADDRESS);
 
     settingMicrophoneThreshhold = EEPROMUtils.readUInt16(SETTING_MICROPHONE_THRESHHOLD_ADDRESS);
@@ -121,6 +132,11 @@ void setup() {
 
     Serial.print("settingFadeStep: ");
     Serial.println(settingFadeStep);
+
+    Serial.print("settingConcentricRange: ");
+    Serial.println(settingConcentricRange);
+    Serial.print("settingConcentricStep: ");
+    Serial.println(settingConcentricStep);
     
     Serial.print("settingMicrophone: ");
     Serial.println(settingMicrophone);
@@ -172,7 +188,7 @@ void loop() {
     }
 }
 
-Setting settings[4][5] = {
+Setting settings[5][6] = {
     { //MODE_COLOR
         {SETTING_COLOR_HUE_ADDRESS,             &settingColorHue,             0,   UINT16_MAX, 1024, true }, //hue, 64 steps for full rotation (little more than 3 turns)
         {SETTING_SATURATION_ADDRESS,            &settingSaturation,           65,  255,        16,   false}, //Saturation, 16 Steps
@@ -194,6 +210,13 @@ Setting settings[4][5] = {
         {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           31,  127,  8, false}, //Brightness, 16 Steps is stored at the same address across modes
         {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           0,   1,    1, false}, //Microphone is stored at the same address across modes
         {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 400, 1023, 1, false}  //Microphone threshhold is stored at the same address across modes
+    }, { //MODE_CONCENTRIC
+        {SETTING_CONCENTRIC_RANGE_ADDRESS,      &settingConcentricRange,      0,   UINT16_MAX, 1024, true }, //Concentric Range, the hue range displayed at any given time
+        {SETTING_CONCENTRIC_STEP_ADDRESS,       &settingConcentricStep,       0,   UINT16_MAX, 8,    true }, //Concentric Step, how far the hue moves while smoking
+        {SETTING_SATURATION_ADDRESS,            &settingSaturation,           65,  255,        16,   false}, //Saturation, 16 Steps is stored at the same address across modes
+        {SETTING_BRIGHTNESS_ADDRESS,            &settingBrightness,           31,  127,        8,    false}, //Brightness, 16 Steps is stored at the same address across modes
+        {SETTING_MICROPHONE_ADDRESS,            &settingMicrophone,           0,   1,          1,    false}, //Microphone is stored at the same address across modes
+        {SETTING_MICROPHONE_THRESHHOLD_ADDRESS, &settingMicrophoneThreshhold, 400, 1023,       1,    false}  //Microphone threshhold is stored at the same address across modes
     }
 };
 
@@ -213,6 +236,10 @@ void setMode(int mode) {
         case MODE_WHITE:
             currentMode = MODE_WHITE;
             currentModeNumSettings = MODE_WHITE_NUM_SETTINGS;
+            break;
+        case MODE_CONCENTRIC:
+            currentMode = MODE_CONCENTRIC;
+            currentModeNumSettings = MODE_CONCENTRIC_NUM_SETTINGS;
             break;
         case MODE_COLOR:
         default:
@@ -254,6 +281,9 @@ void updateLEDs() {
             break;
         case MODE_WHITE:
             updateWhite();
+            break;
+        case MODE_CONCENTRIC:
+            updateConcentric();
             break;
     }
     indicateSetting();
@@ -357,6 +387,24 @@ void updateWhite() {
         if(microphone.isActivated()) {
             setPixelHSV(random(13), random(UINT16_MAX), 255, settingBrightness * LED_BLINK_BRIGHTNESS_FACTOR);
         } 
+    }
+}
+
+uint16_t concentricHue = 0;
+void updateConcentric() {
+    if(settingMicrophone == 1) {
+        if(microphone.isActivated()) {
+            concentricHue += settingConcentricStep;
+        }
+    }
+
+    setPixelHSV(0, concentricHue, settingSaturation, settingBrightness);
+    for(int i = 1; i < LED_COUNT; i++) {
+        if(i%2 == 0) { //outer LED
+            setPixelHSV(i, concentricHue + settingConcentricRange, settingSaturation, settingBrightness);
+        } else { //inner LED
+            setPixelHSV(i, concentricHue + (settingConcentricRange/2), settingSaturation, settingBrightness);
+        }
     }
 }
 
