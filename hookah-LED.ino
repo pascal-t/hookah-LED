@@ -9,7 +9,7 @@
 #endif
 
 #define LED 9
-#define LED_COUNT 13
+#define LED_COUNT 21
 #define UPDATE_DELAY 20 //50 Updates/Second
 unsigned long lastUpdate = 0;
 
@@ -319,30 +319,28 @@ void updateColor() {
 }
 
 uint16_t rainbowCurrentPosition = 0;
-unsigned long rainbowMicrophoneStart = 0;
-int rainbowMicrophoneDuration = 500;
 void updateRainbow() {
-    if(settingMicrophone == 1) {
-        if(microphone.isActivated()) {
-            rainbowMicrophoneStart = millis();
-        }
-
-        //increase the hue of the rainbow. When thw varable overflows it starts over, wich is actually convenient
-        if(millis() - rainbowMicrophoneStart < rainbowMicrophoneDuration) {
-            //turn another stepwidth if microphon was listening in the last 500ms (turn twice as fast)
-            rainbowCurrentPosition += settingRainbowStep * RAINBOW_ACCELERATION_FACTOR;
-        } else {
-            rainbowCurrentPosition += settingRainbowStep;
-        }
+    //increase the hue of the rainbow. When thw varable overflows it starts over, wich is actually convenient
+    if(settingMicrophone == 1 && microphone.isActivated(true)) {
+        //turn another stepwidth if microphon was listening in the last 500ms (turn twice as fast)
+        rainbowCurrentPosition += settingRainbowStep * RAINBOW_ACCELERATION_FACTOR;
+    } else {
+        rainbowCurrentPosition += settingRainbowStep;
     }
 
     //Pixels are positioned as follows: 
-    //  0 is in the center
-    //  1 is halfway from the center
-    //  2 is furthest from the center
-    //  from then on it is alternating between halfway and furthest.
-    setPixelHSV(0, 0,0,settingBrightness); //the center is always white
-    for(int i = 1; i < strip.numPixels(); i++) {
+    //  the first 3 are in the center
+    //  the next 6 are halfway from the center
+    //  the last 12 are furthest from the center
+    for(int i = 0; i < 3; i++) {
+        setPixelHSV(i, (UINT16_MAX/3) * i + rainbowCurrentPosition, 255, settingBrightness);
+    }
+
+    for(int i = 3; i < 9; i++) {
+        setPixelHSV(i, (UINT16_MAX/6) * i + rainbowCurrentPosition, 255, settingBrightness);
+    }
+    
+    for(int i = 9; i < LED_COUNT; i++) {
         //Pixels furthest from the center are displayed at max saturation while the others are at half saturation
         setPixelHSV(i, (UINT16_MAX/12) * i + rainbowCurrentPosition, 255, settingBrightness);
     }
@@ -382,20 +380,14 @@ void updateWhite() {
 
 uint16_t concentricHue = 0;
 void updateConcentric() {
-    if(settingMicrophone == 1) {
-        if(microphone.isActivated()) {
-            concentricHue += settingConcentricStep;
-        }
+    if((settingMicrophone == 1 && microphone.isActivated(true)) 
+        || settings[currentMode][currentSetting].value == &settingConcentricStep ) {
+        concentricHue += settingConcentricStep;
     }
 
-    setPixelHSV(0, concentricHue, settingSaturation, settingBrightness);
-    for(int i = 1; i < LED_COUNT; i++) {
-        if(i%2 == 0) { //outer LED
-            setPixelHSV(i, concentricHue + settingConcentricRange, settingSaturation, settingBrightness);
-        } else { //inner LED
-            setPixelHSV(i, concentricHue + (settingConcentricRange/2), settingSaturation, settingBrightness);
-        }
-    }
+    fillPixelsHSV(concentricHue,                              settingSaturation, settingBrightness, 0, 3);
+    fillPixelsHSV(concentricHue + (settingConcentricRange/2), settingSaturation, settingBrightness, 3, 6);
+    fillPixelsHSV(concentricHue + settingConcentricRange,     settingSaturation, settingBrightness, 9, 12);
 }
 
 const int indicateSettingBlinkFrames = 10;
@@ -422,12 +414,12 @@ void indicateSetting() {
             }
         } else {
             //for all the other settings just turn off enough LEDs to indicate the current setting
-            fillPixelsHSV(0,0,0, 1, currentModeNumSettings - 1);
+            fillPixelsHSV(0,0,0, 9, currentModeNumSettings - 1);
         }
         
         ++indicateSettingFrameCounter %= indicateSettingBlinkFrames * 2;
         if(indicateSettingFrameCounter < indicateSettingBlinkFrames) {
-            setPixelHSV(currentSetting, 0,0,settingBrightness);
+            setPixelHSV(8 + currentSetting, 0,0,settingBrightness);
         }
     }
 }
