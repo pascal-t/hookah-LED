@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include "Button.h"
 
-Button::Button(int pin, int longPressDuration, int mode=INPUT) {
+Button::Button(int pin, int longPressDuration, int mode) {
     pinMode(pin, mode);
 
     _pin = pin;
