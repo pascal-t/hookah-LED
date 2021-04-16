@@ -1,16 +1,15 @@
 #include <Arduino.h>
 #include "Microphone.h"
 
-Microphone::Microphone(int pin, int threshhold, unsigned long smoothing_duration) {
+Microphone::Microphone(int pin, int threshhold) {
     pinMode(pin, INPUT);
 
     _pin = pin;
     _threshhold = threshhold;
-    _smoothing_duration = smoothing_duration;
 }
 void Microphone::read() {
     _level = analogRead(_pin);
-    if(isActivated()) {
+    if(isActivated(0)) {
         _last_activation = millis();
     }
 }
@@ -19,9 +18,9 @@ int Microphone::getLevel() {
     return _level;
 }
 
-bool Microphone::isActivated(bool smooth) {
-    if(smooth) {
-        return millis() - _last_activation < _smoothing_duration;
+bool Microphone::isActivated(int smoothing) {
+    if(smoothing > 0) {
+        return millis() - _last_activation < smoothing;
     } else {
         return _level > _threshhold;
     }

@@ -8,6 +8,8 @@ class EEPROMUtilsClass {
     public:
         static void writeUInt16(int address, uint16_t value);
         static uint16_t readUInt16(int address);
+        static void writeInt16(int address, int16_t value);
+        static int16_t readInt16(int address);
 };
 
 extern EEPROMUtilsClass EEPROMUtils;
